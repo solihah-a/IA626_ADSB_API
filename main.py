@@ -237,6 +237,165 @@ def countInPolygon():
         res["msg"] = "Missing polygon coordinates"
         return send_response(res, token)
 
+    try:
+        if not auth(token):
+            res["msg"] = "Invalid API key"
+            return send_response(res, token)
+    except pymysql.MySQLError:
+        res["msg"] = "Database authentication unavailable"
+        return send_response(res, token)
+
+    try:
+        points = []
+        for pair in polygon.split(","):
+            coordinates = pair.strip().split()
+
+            if len(coordinates) != 2:
+                raise ValueError("Each point needs two coordinates")
+
+            longitude = float(coordinates[0])
+            latitude = float(coordinates[1])
+
+            if not (-180 <= longitude <= 180):
+                raise ValueError("Longitude is out of range")
+
+            if not (-90 <= latitude <= 90):
+                raise ValueError("Latitude is out of range")
+
+            points.append((longitude, latitude))
+
+        if len(points) < 4:
+            raise ValueError("A closed polygon needs at least four points")
+
+        if points[0] != points[-1]:
+            raise ValueError("The polygon must be closed")
+
+        if len(set(points[:-1])) < 3:
+            raise ValueError("A polygon needs three distinct points")
+    except ValueError as error:
+        res["msg"] = f"Invalid polygon: {error}"
+        return send_response(res, token)
+
+    conn = None
+
+    try:
+        polygon_wkt = "POLYGON((" + ", ".join(
+            f"{longitude} {latitude}"
+            for longitude, latitude in points
+        ) + "))"
+
+        conn = pymysql.connect(**db_config)
+        sql = """
+            SELECT COUNT(*) AS aircraft_count
+            FROM class_datapoints
+            WHERE ST_Within(
+                geo_point,
+                ST_GeomFromText(%s, 0)
+            )
+        """
+        with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            sql_start = time.time()
+            cur.execute(sql, (polygon_wkt,))
+            record = cur.fetchone()
+            res["sqltime"] = round(time.time() - sql_start, 4)
+        res["count"] = record["aircraft_count"]
+        res["code"] = 1
+        res["msg"] = "Successfully counted ADS-B records inside polygon"
+    except pymysql.MySQLError:
+        res["msg"] = "Unable to count ADS-B records from the database"
+    finally:
+        if conn is not None:
+            conn.close()
+    return send_response(res, token)
+
+@app.route("/getAvgSpeedByFlight", methods=["GET"])
+def getAvgSpeedByFlight():
+    res = {
+        "code": 0,
+        "msg": "",
+        "req": "getAvgSpeedByFlight",
+        "sqltime": 0.0,
+        "results": []
+    }
+
+    token = request.args.get("key")
+    start = request.args.get("start")
+    end = request.args.get("end")
+
+    if not token:
+        res["msg"] = "Missing API key"
+        return send_response(res, token)
+
+    try:
+        if not auth(token):
+            res["msg"] = "Invalid API key"
+            return send_response(res, token)
+    except pymysql.MySQLError:
+        res["msg"] = "Database authentication unavailable"
+        return send_response(res, token)
+
+    try:
+        start_dt = None
+        end_dt = None
+        if start:
+            start_dt = datetime.datetime.strptime(
+                start, "%Y-%m-%d %H:%M:%S"
+            )
+        if end:
+            end_dt = datetime.datetime.strptime(
+                end, "%Y-%m-%d %H:%M:%S"
+            )
+        if start_dt and end_dt and start_dt > end_dt:
+            res["msg"] = "Start date must be before or equal to end date"
+            return send_response(res, token)
+    except ValueError:
+        res["msg"] = "Invalid date format. Use YYYY-MM-DD HH:MM:SS"
+        return send_response(res, token)
+
+
+    conn = None
+
+    try:
+        conn = pymysql.connect(**db_config)
+
+        sql = """
+            SELECT flight_num, AVG(gs) AS avg_speed
+            FROM class_datapoints
+        """
+
+        conditions = []
+        params = []
+
+        if start_dt:
+            conditions.append("date_time >= %s")
+            params.append(start_dt)
+
+        if end_dt:
+            conditions.append("date_time <= %s")
+            params.append(end_dt)
+
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+
+        sql += """
+            GROUP BY flight_num
+            ORDER BY flight_num
+            LIMIT 500
+        """
+        with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            sql_start = time.time()
+            cur.execute(sql, params)
+            records = cur.fetchall()
+            res["sqltime"] = round(time.time() - sql_start, 4)
+        res["results"] = records
+        res["code"] = 1
+        res["msg"] = f"Successfully calculated averages for {len(records)} flights"
+    except pymysql.MySQLError:
+        res["msg"] = "Unable to calculate average flight speeds from the database"
+    finally:
+        if conn is not None:
+            conn.close()
+
     return send_response(res, token)
 
 
