@@ -11,6 +11,9 @@ with open("config.yml", "r") as file:
     config = yaml.safe_load(file)
     db_config = config['mysql']     
 
+# Limit how long MySQL connection attempts can take
+db_config["connect_timeout"] = 3
+
 def auth(token):
     if token is None:
         return False
@@ -211,7 +214,7 @@ def countInPolygon():
             x1, y1 = points[i]
             x2, y2 = points[i + 1]
             area += x1 * y2 - x2 * y1
-            
+
         if abs(area) < 1e-10:
             raise ValueError("Polygon must have a non-zero area")
     except ValueError as error:
