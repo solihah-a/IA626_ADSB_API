@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS adeboysa_auth (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    token VARCHAR(255) NOT NULL UNIQUE
+);
+
+INSERT INTO adeboysa_auth (token)
+VALUES ('123')
+ON DUPLICATE KEY UPDATE token = VALUES(token);
+
+CREATE TABLE IF NOT EXISTS adeboysa_api_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    endpoint VARCHAR(100) NOT NULL,
+    token VARCHAR(255),
+    response TEXT,
+    dt DATETIME NOT NULL
+);

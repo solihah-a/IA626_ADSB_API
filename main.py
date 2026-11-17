@@ -205,6 +205,15 @@ def countInPolygon():
 
         if len(set(points[:-1])) < 3:
             raise ValueError("A polygon needs three distinct points")
+        
+        area = 0.0
+        for i in range(len(points) - 1):
+            x1, y1 = points[i]
+            x2, y2 = points[i + 1]
+            area += x1 * y2 - x2 * y1
+            
+        if abs(area) < 1e-10:
+            raise ValueError("Polygon must have a non-zero area")
     except ValueError as error:
         res["msg"] = f"Invalid polygon: {error}"
         return send_response(res, token)
@@ -320,6 +329,10 @@ def getAvgSpeedByFlight():
             cur.execute(sql, params)
             records = cur.fetchall()
             res["sqltime"] = round(time.time() - sql_start, 4)
+
+        for record in records:
+            if record["avg_speed"] is not None:
+                record["avg_speed"] = float(record["avg_speed"])
         res["results"] = records
         res["code"] = 1
         res["msg"] = f"Successfully calculated averages for {len(records)} flights"
