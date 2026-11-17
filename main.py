@@ -12,18 +12,19 @@ with open("config.yml", "r") as file:
     config = yaml.safe_load(file)
     db_config = config['mysql']     
 
+
 def auth(token):
     if token is None:
         return False
-    conn = pymysql.connect(**db_config) #setup our credentials
-    cur = conn.cursor(pymysql.cursors.DictCursor)
-    sql = 'SELECT * FROM class_auth WHERE `token` = %s;'
-    cur.execute(sql,(token))
-    results = cur.fetchall()
-    if len(results) == 1:
-        return True
-    else:
-        return False
+    conn = pymysql.connect(**db_config)
+    try:
+        with conn.cursor() as cur:
+            sql = "SELECT COUNT(*) FROM `adeboysa_auth` WHERE `token` = %s"
+            cur.execute(sql, (token,))
+            count = cur.fetchone()[0]
+        return count == 1
+    finally:
+        conn.close()
 
 def log(token,endpoint,response):
     conn = pymysql.connect(**db_config) #setup our credentials
