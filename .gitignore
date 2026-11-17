@@ -1,0 +1,13 @@
+# Database credentials
+config.yml
+
+# Python-generated files
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+
+# Local environment files
+.env
