@@ -26,12 +26,24 @@ def auth(token):
     finally:
         conn.close()
 
-def log(token,endpoint,response):
-    conn = pymysql.connect(**db_config) #setup our credentials
-    cur = conn.cursor(pymysql.cursors.DictCursor)
-    sql = 'INSERT INTO `class_api-logs` (`endpoint`,`token`,`response`,`dt`) VALUES (%s,%s,%s,%s)'
-    dt = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    cur.execute(sql,(token,endpoint,response,dt))
+
+def log(token, endpoint, response):
+    conn = pymysql.connect(**db_config)
+    try:
+        with conn.cursor() as cur:
+            sql = """
+                INSERT INTO `adeboysa_api_logs`
+                (`endpoint`, `token`, `response`, `dt`)
+                VALUES (%s, %s, %s, %s)
+            """
+            dt = datetime.datetime.now().strftime(
+                '%Y-%m-%d %H:%M:%S'
+            )
+            cur.execute(sql, (endpoint, token, str(response), dt))
+            conn.commit()
+    finally:
+        conn.close()
+
 
 
 @app.route("/", methods=['GET','POST'])
@@ -103,6 +115,129 @@ def searchCountry():
     res['num_results'] = len(items)
     log(request.args.get('key'),res['req'],'200')
     return json.dumps(res,indent=4)
+
+
+def send_response(res, token):
+    endpoint = res["req"]
+
+    try:
+        log(token, endpoint, json.dumps(res, default=str))
+    except pymysql.MySQLError:
+        print(f"Warning: Could not log request to {endpoint}")
+
+    if res["code"] == 1:
+        status = 200
+    elif res["msg"] == "Invalid API key":
+        status = 401
+    elif "database" in res["msg"].lower():
+        status = 503
+    else:
+        status = 400
+
+    return app.response_class(
+        response=json.dumps(res, indent=4, default=str),
+        status=status,
+        mimetype="application/json"
+    )
+
+@app.route("/getData", methods=["GET"])
+def getData():
+    res = {
+        "code": 0,
+        "msg": "",
+        "req": "getData",
+        "sqltime": 0.0,
+        "results": []
+    }
+    token = request.args.get("key")
+    start = request.args.get("start")
+    end = request.args.get("end")
+
+    if not token:
+        res["msg"] = "Missing API key"
+        return send_response(res, token)
+
+    if not start or not end:
+        res["msg"] = "Both start and end dates are required"
+        return send_response(res, token)
+
+    try:
+        if not auth(token):
+            res["msg"] = "Invalid API key"
+            return send_response(res, token)
+    except pymysql.MySQLError:
+        res["msg"] = "Database authentication unavailable"
+        return send_response(res, token)
+
+    try:
+        start_dt = datetime.datetime.strptime(
+            start, "%Y-%m-%d %H:%M:%S"
+        )
+        end_dt = datetime.datetime.strptime(
+            end, "%Y-%m-%d %H:%M:%S"
+        )
+        if start_dt > end_dt:
+            res["msg"] = "Start date must be before or equal to end date"
+            return send_response(res, token)
+    except ValueError:
+        res["msg"] = "Invalid date format. Use YYYY-MM-DD HH:MM:SS"
+        return send_response(res, token)
+
+    conn = None
+
+    try:
+        conn = pymysql.connect(**db_config)
+
+        sql = """
+            SELECT *
+            FROM class_datapoints
+            WHERE date_time BETWEEN %s AND %s
+            ORDER BY date_time
+            LIMIT 500
+        """
+
+        with conn.cursor(pymysql.cursors.DictCursor) as cur:
+            sql_start = time.time()
+            cur.execute(sql, (start_dt, end_dt))
+            records = cur.fetchall()
+            res["sqltime"] = round(time.time() - sql_start, 4)
+
+        res["code"] = 1
+        res["msg"] = f"Successfully retrieved {len(records)} records"
+        res["results"] = records
+
+    except pymysql.MySQLError:
+        res["msg"] = "Unable to retrieve ADS-B records from the database"
+
+    finally:
+        if conn is not None:
+            conn.close()
+    
+    return send_response(res, token)
+
+
+@app.route("/countInPolygon", methods=["GET"])
+def countInPolygon():
+    res = {
+        "code": 0,
+        "msg": "",
+        "req": "countInPolygon",
+        "sqltime": 0.0,
+        "count": 0
+    }
+
+    token = request.args.get("key")
+    polygon = request.args.get("polygon")
+
+    if not token:
+        res["msg"] = "Missing API key"
+        return send_response(res, token)
+
+    if not polygon:
+        res["msg"] = "Missing polygon coordinates"
+        return send_response(res, token)
+
+    return send_response(res, token)
 
 
 if __name__ == "__main__":
